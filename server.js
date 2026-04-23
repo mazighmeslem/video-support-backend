@@ -25,7 +25,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', sessions: sessions.size });
 });
 
-// ── AGENT VIEWER (opens in new tab) ──────────────────────────────────────────
+// ── AGENT VIEWER ──────────────────────────────────────────────────────────────
 app.get('/viewer/:sessionId', (req, res) => {
   const sessionId = req.params.sessionId;
   res.send(`<!DOCTYPE html>
@@ -47,7 +47,7 @@ header{padding:12px 20px;background:rgba(0,0,0,0.5);display:flex;align-items:cen
 .end-btn:hover{background:#b02b37}
 .video-area{flex:1;display:flex;align-items:center;justify-content:center;position:relative}
 #agentVideo{width:100%;height:100%;object-fit:contain;display:none}
-.waiting{text-align:center;color:rgba(255,255,255,0.3);position:absolute}
+.waiting{text-align:center;color:rgba(255,255,255,0.3);position:absolute;padding:20px}
 .waiting svg{display:block;margin:0 auto 12px;opacity:0.2}
 .waiting p{font-size:14px}
 .waiting small{font-size:12px;opacity:0.6;display:block;margin-top:6px}
@@ -69,71 +69,49 @@ header{padding:12px 20px;background:rgba(0,0,0,0.5);display:flex;align-items:cen
   <video id="agentVideo" autoplay playsinline></video>
 </div>
 <script>
-var B='${BACKEND_URL}', S='${sessionId}', pc=null, secs=0, timer=null;
+var B='${BACKEND_URL}', S='${sessionId}', pc=null, secs=0, tmr=null;
 
-function tick(){
-  secs++;
-  var m=String(Math.floor(secs/60)).padStart(2,'0');
-  var s=String(secs%60).padStart(2,'0');
-  document.getElementById('timer').textContent=m+':'+s;
-}
+function tick(){ secs++; var m=String(Math.floor(secs/60)).padStart(2,'0'),s=String(secs%60).padStart(2,'0'); document.getElementById('timer').textContent=m+':'+s; }
 
 function pollOffer(n){
   if(n>60){ document.querySelector('.waiting p').textContent='Customer did not connect. Close this tab and try again.'; return; }
   fetch(B+'/sessions/'+S+'/offer')
   .then(function(r){ return r.json(); })
-  .then(function(d){
-    if(d.offer){ connectRTC(d.offer); }
-    else{ setTimeout(function(){ pollOffer(n+1); },2000); }
-  })
+  .then(function(d){ if(d.offer){ connectRTC(d.offer); } else { setTimeout(function(){ pollOffer(n+1); },2000); } })
   .catch(function(){ setTimeout(function(){ pollOffer(n+1); },2000); });
 }
 
 function connectRTC(offer){
-  pc=new RTCPeerConnection({iceServers:[
-    {urls:'stun:stun.l.google.com:19302'},
-    {urls:'stun:stun1.l.google.com:19302'}
-  ]});
+  pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
   pc.ontrack=function(e){
     var v=document.getElementById('agentVideo');
-    v.srcObject=e.streams[0];
-    v.style.display='block';
+    v.srcObject=e.streams[0]; v.style.display='block';
     document.getElementById('waiting').style.display='none';
     document.getElementById('badge').style.display='flex';
-    timer=setInterval(tick,1000);
+    tmr=setInterval(tick,1000);
   };
   var agentIce=[];
-  pc.onicecandidate=function(e){
-    if(e.candidate) agentIce.push(e.candidate);
-  };
+  pc.onicecandidate=function(e){ if(e.candidate) agentIce.push(e.candidate); };
   pc.setRemoteDescription(new RTCSessionDescription(offer))
   .then(function(){ return pc.createAnswer(); })
   .then(function(a){ return pc.setLocalDescription(a); })
-  .then(function(){
-    return new Promise(function(r){ setTimeout(r,2500); });
-  })
+  .then(function(){ return new Promise(function(r){ setTimeout(r,2500); }); })
   .then(function(){
     return fetch(B+'/sessions/'+S+'/answer',{
       method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({answer:pc.localDescription, candidates:agentIce})
     });
   })
-  .then(function(){
-    return fetch(B+'/sessions/'+S+'/customer-ice');
-  })
+  .then(function(){ return fetch(B+'/sessions/'+S+'/customer-ice'); })
   .then(function(r){ return r.json(); })
   .then(function(d){
-    if(d.candidates){
-      d.candidates.forEach(function(c){
-        pc.addIceCandidate(new RTCIceCandidate(c)).catch(function(){});
-      });
-    }
+    if(d.candidates){ d.candidates.forEach(function(c){ pc.addIceCandidate(new RTCIceCandidate(c)).catch(function(){}); }); }
   });
 }
 
 function endSession(){
   if(pc){ pc.close(); pc=null; }
-  clearInterval(timer);
+  clearInterval(tmr);
   fetch(B+'/sessions/'+S+'/end',{method:'POST'}).catch(function(){});
   window.close();
 }
@@ -242,6 +220,8 @@ if(isIOS&&!isSafari){
 function startCam(){
   var btn=document.getElementById('btnStart');
   btn.disabled=true; btn.textContent='Starting...';
+  if(stream){ stream.getTracks().forEach(function(t){ t.stop(); }); stream=null; }
+  if(pc){ pc.close(); pc=null; }
   navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false})
   .catch(function(){ return navigator.mediaDevices.getUserMedia({video:true,audio:false}); })
   .then(function(s){
@@ -263,16 +243,13 @@ function startCam(){
     btn.disabled=false; btn.textContent='Share my camera';
     var msg=e.name==='NotAllowedError'
       ?'Camera access denied. Please allow camera in your browser settings and try again.'
-      :'Could not start camera. Try opening this page in Safari (iPhone) or Chrome (Android).';
+      :'Could not start camera. Tap the button again to retry.';
     setBar(msg,'err');
   });
 }
 
 function doWebRTC(){
-  pc=new RTCPeerConnection({iceServers:[
-    {urls:'stun:stun.l.google.com:19302'},
-    {urls:'stun:stun1.l.google.com:19302'}
-  ]});
+  pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
   stream.getTracks().forEach(function(t){ pc.addTrack(t,stream); });
   var ice=[];
   return pc.createOffer()
