@@ -304,6 +304,7 @@ window.addEventListener('beforeunload',function(){
 </html>`);
 });
 
+// ── SESSIONS ──────────────────────────────────────────────────────────────────
 app.post('/sessions', (req, res) => {
   const ticket_id = req.body.ticket_id;
   if (!ticket_id) return res.status(400).json({ error: 'ticket_id required' });
@@ -320,9 +321,21 @@ app.post('/sessions', (req, res) => {
   res.json({ session_id: session_id, customer_url: customer_url, viewer_url: viewer_url });
 });
 
+// Auto-recreate session if expired — fixes Railway restart issue
+function getOrCreateSession(id) {
+  if (!sessions.has(id)) {
+    sessions.set(id, {
+      id: id, ticket_id: 'unknown',
+      created_at: Date.now(), status: 'waiting',
+      offer: null, answer: null,
+      customer_ice: [], agent_ice: []
+    });
+  }
+  return sessions.get(id);
+}
+
 app.post('/sessions/:id/offer', (req, res) => {
-  const session = sessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
+  const session = getOrCreateSession(req.params.id);
   session.offer = req.body.offer;
   session.customer_ice = req.body.candidates || [];
   session.status = 'offer_received';
@@ -331,13 +344,12 @@ app.post('/sessions/:id/offer', (req, res) => {
 
 app.get('/sessions/:id/offer', (req, res) => {
   const session = sessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!session) return res.json({ offer: null });
   res.json({ offer: session.offer || null });
 });
 
 app.post('/sessions/:id/answer', (req, res) => {
-  const session = sessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
+  const session = getOrCreateSession(req.params.id);
   session.answer = req.body.answer;
   session.status = 'connected';
   res.json({ ok: true });
@@ -345,7 +357,7 @@ app.post('/sessions/:id/answer', (req, res) => {
 
 app.get('/sessions/:id/answer', (req, res) => {
   const session = sessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!session) return res.json({ answer: null });
   res.json({ answer: session.answer || null });
 });
 
@@ -358,13 +370,13 @@ app.post('/sessions/:id/agent-ice', (req, res) => {
 
 app.get('/sessions/:id/agent-ice', (req, res) => {
   const session = sessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!session) return res.json({ candidates: [] });
   res.json({ candidates: session.agent_ice });
 });
 
 app.get('/sessions/:id/customer-ice', (req, res) => {
   const session = sessions.get(req.params.id);
-  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!session) return res.json({ candidates: [] });
   res.json({ candidates: session.customer_ice });
 });
 
@@ -373,6 +385,7 @@ app.post('/sessions/:id/end', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── SMS ───────────────────────────────────────────────────────────────────────
 app.post('/sms', async (req, res) => {
   const to = req.body.to, url = req.body.url, ticket_id = req.body.ticket_id;
   if (!to || !url) return res.status(400).json({ error: 'to and url required' });
