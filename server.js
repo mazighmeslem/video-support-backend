@@ -25,10 +25,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', sessions: sessions.size });
 });
 
-// ── AGENT VIEWER PAGE (opens in new tab, no iframe restrictions) ──────────────
+// ── AGENT VIEWER (opens in new tab) ──────────────────────────────────────────
 app.get('/viewer/:sessionId', (req, res) => {
   const sessionId = req.params.sessionId;
-  const html = `<!DOCTYPE html>
+  res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -36,84 +36,81 @@ app.get('/viewer/:sessionId', (req, res) => {
 <title>Live View — Support</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#07111f;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;flex-direction:column;height:100vh}
-header{padding:12px 20px;background:rgba(0,0,0,0.4);display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,0.1)}
-.logo{font-size:14px;font-weight:600}
-.live-badge{background:#cc3340;font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;display:none;align-items:center;gap:5px}
+body{background:#07111f;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:flex;flex-direction:column;height:100vh;overflow:hidden}
+header{padding:12px 20px;background:rgba(0,0,0,0.5);display:flex;align-items:center;gap:12px;border-bottom:1px solid rgba(255,255,255,0.1);flex-shrink:0}
+.title{font-size:14px;font-weight:600}
+.badge{background:#cc3340;font-size:10px;font-weight:700;padding:3px 8px;border-radius:99px;display:none;align-items:center;gap:5px}
 .dot{width:6px;height:6px;background:#fff;border-radius:50%;animation:blink 1.1s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
-.timer{margin-left:auto;font-size:13px;color:rgba(255,255,255,0.6);font-variant-numeric:tabular-nums}
-.end-btn{padding:6px 14px;background:#cc3340;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
-.video-area{flex:1;position:relative;display:flex;align-items:center;justify-content:center}
-video{width:100%;height:100%;object-fit:contain;display:none}
-.waiting{text-align:center;color:rgba(255,255,255,0.3)}
+.timer{margin-left:auto;font-size:13px;color:rgba(255,255,255,0.5);font-variant-numeric:tabular-nums}
+.end-btn{padding:7px 16px;background:#cc3340;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer}
+.end-btn:hover{background:#b02b37}
+.video-area{flex:1;display:flex;align-items:center;justify-content:center;position:relative}
+#agentVideo{width:100%;height:100%;object-fit:contain;display:none}
+.waiting{text-align:center;color:rgba(255,255,255,0.3);position:absolute}
 .waiting svg{display:block;margin:0 auto 12px;opacity:0.2}
 .waiting p{font-size:14px}
-.status{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;font-size:12px;padding:6px 14px;border-radius:99px}
+.waiting small{font-size:12px;opacity:0.6;display:block;margin-top:6px}
 </style>
 </head>
 <body>
 <header>
-  <span class="logo">Support — Live View</span>
-  <div class="live-badge" id="badge"><div class="dot"></div>LIVE</div>
+  <span class="title">Support — Live View</span>
+  <div class="badge" id="badge"><div class="dot"></div>LIVE</div>
   <span class="timer" id="timer">00:00</span>
   <button class="end-btn" onclick="endSession()">End session</button>
 </header>
 <div class="video-area">
   <div class="waiting" id="waiting">
-    <svg width="48" height="48" viewBox="0 0 24 24" fill="white"><path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z"/></svg>
+    <svg width="56" height="56" viewBox="0 0 24 24" fill="white"><path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z"/></svg>
     <p>Waiting for customer to connect...</p>
+    <small>Send the link to your customer and ask them to tap "Share my camera"</small>
   </div>
   <video id="agentVideo" autoplay playsinline></video>
-  <div class="status" id="status-msg"></div>
 </div>
 <script>
-var B='${BACKEND_URL}', S='${sessionId}', pc=null, timerInterval=null, seconds=0;
+var B='${BACKEND_URL}', S='${sessionId}', pc=null, secs=0, timer=null;
 
-function startTimer(){
-  timerInterval=setInterval(function(){
-    seconds++;
-    var m=String(Math.floor(seconds/60)).padStart(2,'0');
-    var s=String(seconds%60).padStart(2,'0');
-    document.getElementById('timer').textContent=m+':'+s;
-  },1000);
+function tick(){
+  secs++;
+  var m=String(Math.floor(secs/60)).padStart(2,'0');
+  var s=String(secs%60).padStart(2,'0');
+  document.getElementById('timer').textContent=m+':'+s;
 }
 
-function setStatus(msg){ document.getElementById('status-msg').textContent=msg; }
-
-function pollForOffer(n){
-  if(n>60){ setStatus('Customer did not connect. Close this tab.'); return; }
+function pollOffer(n){
+  if(n>60){ document.querySelector('.waiting p').textContent='Customer did not connect. Close this tab and try again.'; return; }
   fetch(B+'/sessions/'+S+'/offer')
   .then(function(r){ return r.json(); })
   .then(function(d){
-    if(d.offer){ connectWebRTC(d.offer); }
-    else{ setTimeout(function(){ pollForOffer(n+1); }, 2000); }
+    if(d.offer){ connectRTC(d.offer); }
+    else{ setTimeout(function(){ pollOffer(n+1); },2000); }
   })
-  .catch(function(){ setTimeout(function(){ pollForOffer(n+1); }, 2000); });
+  .catch(function(){ setTimeout(function(){ pollOffer(n+1); },2000); });
 }
 
-function connectWebRTC(offer){
-  pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+function connectRTC(offer){
+  pc=new RTCPeerConnection({iceServers:[
+    {urls:'stun:stun.l.google.com:19302'},
+    {urls:'stun:stun1.l.google.com:19302'}
+  ]});
   pc.ontrack=function(e){
     var v=document.getElementById('agentVideo');
     v.srcObject=e.streams[0];
     v.style.display='block';
     document.getElementById('waiting').style.display='none';
     document.getElementById('badge').style.display='flex';
-    startTimer();
-    setStatus('');
+    timer=setInterval(tick,1000);
   };
   var agentIce=[];
   pc.onicecandidate=function(e){
-    if(e.candidate){ agentIce.push(e.candidate); }
+    if(e.candidate) agentIce.push(e.candidate);
   };
   pc.setRemoteDescription(new RTCSessionDescription(offer))
   .then(function(){ return pc.createAnswer(); })
   .then(function(a){ return pc.setLocalDescription(a); })
   .then(function(){
-    return new Promise(function(res){
-      setTimeout(res, 2000);
-    });
+    return new Promise(function(r){ setTimeout(r,2500); });
   })
   .then(function(){
     return fetch(B+'/sessions/'+S+'/answer',{
@@ -122,34 +119,36 @@ function connectWebRTC(offer){
     });
   })
   .then(function(){
-    var r=fetch(B+'/sessions/'+S+'/customer-ice');
-    return r;
+    return fetch(B+'/sessions/'+S+'/customer-ice');
   })
   .then(function(r){ return r.json(); })
   .then(function(d){
-    if(d.candidates){ d.candidates.forEach(function(c){ pc.addIceCandidate(new RTCIceCandidate(c)).catch(function(){}); }); }
+    if(d.candidates){
+      d.candidates.forEach(function(c){
+        pc.addIceCandidate(new RTCIceCandidate(c)).catch(function(){});
+      });
+    }
   });
 }
 
 function endSession(){
   if(pc){ pc.close(); pc=null; }
-  clearInterval(timerInterval);
+  clearInterval(timer);
   fetch(B+'/sessions/'+S+'/end',{method:'POST'}).catch(function(){});
   window.close();
 }
 
-pollForOffer(0);
+pollOffer(0);
 </script>
 </body>
-</html>`;
-  res.send(html);
+</html>`);
 });
 
 // ── CUSTOMER PAGE ─────────────────────────────────────────────────────────────
 app.get('/cam/:sessionId', (req, res) => {
   const sessionId = req.params.sessionId;
   const ticketId = req.query.ticket || '';
-  const html = `<!DOCTYPE html>
+  res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -177,8 +176,7 @@ video{width:100%;height:100%;object-fit:cover;display:none}
 .bar.err{background:#fde8e8;color:#cc3340;display:block}
 .btn{display:block;width:100%;padding:14px;border-radius:8px;font-size:15px;font-weight:600;text-align:center;cursor:pointer;border:none;margin-top:8px}
 .btn:disabled{opacity:0.5;cursor:not-allowed}
-.go{background:#1f73b7;color:#fff}
-.go:hover:not(:disabled){background:#1a62a0}
+.go{background:#1f73b7;color:#fff}.go:hover:not(:disabled){background:#1a62a0}
 .stop{background:#fde8e8;color:#cc3340;border:1px solid #f5c4c4;display:none}
 .safari-box{background:#fff3e0;border-radius:12px;border:2px solid #f0a500;padding:20px;display:none;text-align:center}
 .safari-box h2{font-size:18px;font-weight:700;color:#2f3941;margin-bottom:8px}
@@ -244,9 +242,8 @@ if(isIOS&&!isSafari){
 function startCam(){
   var btn=document.getElementById('btnStart');
   btn.disabled=true; btn.textContent='Starting...';
-  // Fix: try back camera first, fallback to any camera
-  tryCamera({video:{facingMode:{ideal:'environment'}},audio:false})
-  .catch(function(){ return tryCamera({video:true,audio:false}); })
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false})
+  .catch(function(){ return navigator.mediaDevices.getUserMedia({video:true,audio:false}); })
   .then(function(s){
     stream=s;
     var v=document.getElementById('vid');
@@ -261,6 +258,8 @@ function startCam(){
     document.getElementById('btnStop').style.display='block';
   })
   .catch(function(e){
+    if(stream){ stream.getTracks().forEach(function(t){ t.stop(); }); stream=null; }
+    if(pc){ pc.close(); pc=null; }
     btn.disabled=false; btn.textContent='Share my camera';
     var msg=e.name==='NotAllowedError'
       ?'Camera access denied. Please allow camera in your browser settings and try again.'
@@ -269,12 +268,11 @@ function startCam(){
   });
 }
 
-function tryCamera(constraints){
-  return navigator.mediaDevices.getUserMedia(constraints);
-}
-
 function doWebRTC(){
-  pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+  pc=new RTCPeerConnection({iceServers:[
+    {urls:'stun:stun.l.google.com:19302'},
+    {urls:'stun:stun1.l.google.com:19302'}
+  ]});
   stream.getTracks().forEach(function(t){ pc.addTrack(t,stream); });
   var ice=[];
   return pc.createOffer()
@@ -287,21 +285,21 @@ function doWebRTC(){
   })
   .then(function(){
     return fetch(B+'/sessions/'+S+'/offer',{
-      method:'POST',headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json'},
       body:JSON.stringify({offer:pc.localDescription,candidates:ice})
     });
   })
-  .then(function(){ return waitForAnswer(0); });
+  .then(function(){ return waitAnswer(0); });
 }
 
-function waitForAnswer(n){
+function waitAnswer(n){
   if(n>40) return Promise.resolve();
   return new Promise(function(r){ setTimeout(r,1500); })
   .then(function(){ return fetch(B+'/sessions/'+S+'/answer'); })
   .then(function(r){ return r.json(); })
   .then(function(d){
     if(d.answer){ return pc.setRemoteDescription(new RTCSessionDescription(d.answer)); }
-    return waitForAnswer(n+1);
+    return waitAnswer(n+1);
   });
 }
 
@@ -328,10 +326,10 @@ window.addEventListener('beforeunload',function(){
 });
 </script>
 </body>
-</html>`;
-  res.send(html);
+</html>`);
 });
 
+// ── SESSIONS ──────────────────────────────────────────────────────────────────
 app.post('/sessions', (req, res) => {
   const ticket_id = req.body.ticket_id;
   if (!ticket_id) return res.status(400).json({ error: 'ticket_id required' });
@@ -367,7 +365,6 @@ app.post('/sessions/:id/answer', (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   session.answer = req.body.answer;
-  session.customer_ice = req.body.candidates || session.customer_ice;
   session.status = 'connected';
   res.json({ ok: true });
 });
@@ -402,10 +399,9 @@ app.post('/sessions/:id/end', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── SMS ───────────────────────────────────────────────────────────────────────
 app.post('/sms', async (req, res) => {
-  const to = req.body.to;
-  const url = req.body.url;
-  const ticket_id = req.body.ticket_id;
+  const to = req.body.to, url = req.body.url, ticket_id = req.body.ticket_id;
   if (!to || !url) return res.status(400).json({ error: 'to and url required' });
   if (!twilioClient) return res.status(503).json({ error: 'SMS not configured' });
   try {
