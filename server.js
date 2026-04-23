@@ -25,7 +25,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', sessions: sessions.size });
 });
 
-// ── AGENT VIEWER ──────────────────────────────────────────────────────────────
 app.get('/viewer/:sessionId', (req, res) => {
   const sessionId = req.params.sessionId;
   res.send(`<!DOCTYPE html>
@@ -122,7 +121,6 @@ pollOffer(0);
 </html>`);
 });
 
-// ── CUSTOMER PAGE ─────────────────────────────────────────────────────────────
 app.get('/cam/:sessionId', (req, res) => {
   const sessionId = req.params.sessionId;
   const ticketId = req.query.ticket || '';
@@ -306,7 +304,6 @@ window.addEventListener('beforeunload',function(){
 </html>`);
 });
 
-// ── SESSIONS ──────────────────────────────────────────────────────────────────
 app.post('/sessions', (req, res) => {
   const ticket_id = req.body.ticket_id;
   if (!ticket_id) return res.status(400).json({ error: 'ticket_id required' });
@@ -376,7 +373,6 @@ app.post('/sessions/:id/end', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── SMS ───────────────────────────────────────────────────────────────────────
 app.post('/sms', async (req, res) => {
   const to = req.body.to, url = req.body.url, ticket_id = req.body.ticket_id;
   if (!to || !url) return res.status(400).json({ error: 'to and url required' });
