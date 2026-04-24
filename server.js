@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 const sessions = new Map();
 
@@ -25,6 +25,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', sessions: sessions.size });
 });
 
+// ── AGENT VIEWER ──────────────────────────────────────────────────────────────
 app.get('/viewer/:sessionId', (req, res) => {
   const sessionId = req.params.sessionId;
   res.send(`<!DOCTYPE html>
@@ -43,13 +44,12 @@ header{padding:12px 20px;background:rgba(0,0,0,0.5);display:flex;align-items:cen
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
 .timer{margin-left:auto;font-size:13px;color:rgba(255,255,255,0.5);font-variant-numeric:tabular-nums}
 .end-btn{padding:7px 16px;background:#cc3340;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer}
-.end-btn:hover{background:#b02b37}
-.video-area{flex:1;display:flex;align-items:center;justify-content:center;position:relative}
-#agentVideo{width:100%;height:100%;object-fit:contain;display:none}
-.waiting{text-align:center;color:rgba(255,255,255,0.3);position:absolute;padding:20px}
-.waiting svg{display:block;margin:0 auto 12px;opacity:0.2}
-.waiting p{font-size:14px}
-.waiting small{font-size:12px;opacity:0.6;display:block;margin-top:6px}
+.video-area{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+#agentVideo{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;}
+.waiting{text-align:center;color:rgba(255,255,255,0.4);z-index:2;padding:20px}
+.waiting svg{display:block;margin:0 auto 12px;opacity:0.3}
+.waiting p{font-size:15px;margin-bottom:6px}
+.waiting small{font-size:12px;opacity:0.6}
 </style>
 </head>
 <body>
@@ -62,41 +62,73 @@ header{padding:12px 20px;background:rgba(0,0,0,0.5);display:flex;align-items:cen
 <div class="video-area">
   <div class="waiting" id="waiting">
     <svg width="56" height="56" viewBox="0 0 24 24" fill="white"><path d="M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z"/></svg>
-    <p>Waiting for customer to connect...</p>
-    <small>Send the link to your customer and ask them to tap "Share my camera"</small>
+    <p>Waiting for customer...</p>
+    <small>Ask customer to open the link and tap "Share my camera"</small>
   </div>
-  <video id="agentVideo" autoplay playsinline></video>
+  <video id="agentVideo" autoplay playsinline muted></video>
 </div>
 <script>
-var B='${BACKEND_URL}', S='${sessionId}', pc=null, secs=0, tmr=null;
+var B='${BACKEND_URL}', S='${sessionId}', pc=null, secs=0, tmr=null, started=false;
 
 function tick(){ secs++; var m=String(Math.floor(secs/60)).padStart(2,'0'),s=String(secs%60).padStart(2,'0'); document.getElementById('timer').textContent=m+':'+s; }
 
 function pollOffer(n){
-  if(n>60){ document.querySelector('.waiting p').textContent='Customer did not connect. Close this tab and try again.'; return; }
+  if(n>120) return;
   fetch(B+'/sessions/'+S+'/offer')
   .then(function(r){ return r.json(); })
-  .then(function(d){ if(d.offer){ connectRTC(d.offer); } else { setTimeout(function(){ pollOffer(n+1); },2000); } })
+  .then(function(d){
+    if(d.offer && !started){ started=true; connectRTC(d.offer); }
+    else if(!started){ setTimeout(function(){ pollOffer(n+1); },2000); }
+  })
   .catch(function(){ setTimeout(function(){ pollOffer(n+1); },2000); });
 }
 
 function connectRTC(offer){
-  pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+  pc=new RTCPeerConnection({
+    iceServers:[
+      {urls:'stun:stun.l.google.com:19302'},
+      {urls:'stun:stun1.l.google.com:19302'},
+      {urls:'stun:stun2.l.google.com:19302'}
+    ]
+  });
+
   pc.ontrack=function(e){
+    console.log('Track received', e.track.kind);
     var v=document.getElementById('agentVideo');
-    v.srcObject=e.streams[0];
-    v.style.display='block';
-    v.play().catch(function(){});
-    document.getElementById('waiting').style.display='none';
-    document.getElementById('badge').style.display='flex';
-    tmr=setInterval(tick,1000);
+    var stream = e.streams && e.streams[0] ? e.streams[0] : new MediaStream([e.track]);
+    v.srcObject=stream;
+    v.oncanplay=function(){
+      console.log('Video can play');
+      v.play().then(function(){
+        document.getElementById('waiting').style.display='none';
+        document.getElementById('badge').style.display='flex';
+        if(!tmr) tmr=setInterval(tick,1000);
+      }).catch(function(err){ console.error('Play error',err); });
+    };
+    // fallback if oncanplay doesn't fire
+    setTimeout(function(){
+      if(v.readyState >= 2){
+        v.play().catch(function(){});
+        document.getElementById('waiting').style.display='none';
+        document.getElementById('badge').style.display='flex';
+        if(!tmr) tmr=setInterval(tick,1000);
+      }
+    }, 2000);
   };
+
+  pc.oniceconnectionstatechange=function(){
+    console.log('ICE state:', pc.iceConnectionState);
+  };
+
   var agentIce=[];
-  pc.onicecandidate=function(e){ if(e.candidate) agentIce.push(e.candidate); };
+  pc.onicecandidate=function(e){
+    if(e.candidate) agentIce.push(e.candidate);
+  };
+
   pc.setRemoteDescription(new RTCSessionDescription(offer))
   .then(function(){ return pc.createAnswer(); })
   .then(function(a){ return pc.setLocalDescription(a); })
-  .then(function(){ return new Promise(function(r){ setTimeout(r,2500); }); })
+  .then(function(){ return new Promise(function(r){ setTimeout(r,3000); }); })
   .then(function(){
     return fetch(B+'/sessions/'+S+'/answer',{
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -106,8 +138,13 @@ function connectRTC(offer){
   .then(function(){ return fetch(B+'/sessions/'+S+'/customer-ice'); })
   .then(function(r){ return r.json(); })
   .then(function(d){
-    if(d.candidates){ d.candidates.forEach(function(c){ pc.addIceCandidate(new RTCIceCandidate(c)).catch(function(){}); }); }
-  });
+    if(d.candidates){
+      d.candidates.forEach(function(c){
+        pc.addIceCandidate(new RTCIceCandidate(c)).catch(function(e){ console.log('ICE err',e); });
+      });
+    }
+  })
+  .catch(function(e){ console.error('RTC error',e); });
 }
 
 function endSession(){
@@ -123,6 +160,7 @@ pollOffer(0);
 </html>`);
 });
 
+// ── CUSTOMER PAGE ─────────────────────────────────────────────────────────────
 app.get('/cam/:sessionId', (req, res) => {
   const sessionId = req.params.sessionId;
   const ticketId = req.query.ticket || '';
@@ -249,7 +287,13 @@ function startCam(){
 }
 
 function doWebRTC(){
-  pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+  pc=new RTCPeerConnection({
+    iceServers:[
+      {urls:'stun:stun.l.google.com:19302'},
+      {urls:'stun:stun1.l.google.com:19302'},
+      {urls:'stun:stun2.l.google.com:19302'}
+    ]
+  });
   stream.getTracks().forEach(function(t){ pc.addTrack(t,stream); });
   var ice=[];
   return pc.createOffer()
@@ -306,6 +350,7 @@ window.addEventListener('beforeunload',function(){
 </html>`);
 });
 
+// ── SESSIONS ──────────────────────────────────────────────────────────────────
 app.post('/sessions', (req, res) => {
   const ticket_id = req.body.ticket_id;
   if (!ticket_id) return res.status(400).json({ error: 'ticket_id required' });
