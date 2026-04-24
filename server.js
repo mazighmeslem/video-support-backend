@@ -18,7 +18,8 @@ if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
   console.log('Twilio not configured');
 }
 
-const BACKEND_URL = process.env.PUBLIC_BACKEND_URL || 'https://video-support-backend-production.up.railway.app';const PORT = parseInt(process.env.PORT, 10) || 3001;
+const BACKEND_URL = 'https://video-support-backend-production.up.railway.app';
+const PORT = parseInt(process.env.PORT, 10) || 3001;
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', sessions: sessions.size });
