@@ -84,7 +84,9 @@ function connectRTC(offer){
   pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
   pc.ontrack=function(e){
     var v=document.getElementById('agentVideo');
-    v.srcObject=e.streams[0]; v.style.display='block';
+    v.srcObject=e.streams[0];
+    v.style.display='block';
+    v.play().catch(function(){});
     document.getElementById('waiting').style.display='none';
     document.getElementById('badge').style.display='flex';
     tmr=setInterval(tick,1000);
@@ -304,7 +306,6 @@ window.addEventListener('beforeunload',function(){
 </html>`);
 });
 
-// ── SESSIONS ──────────────────────────────────────────────────────────────────
 app.post('/sessions', (req, res) => {
   const ticket_id = req.body.ticket_id;
   if (!ticket_id) return res.status(400).json({ error: 'ticket_id required' });
@@ -321,7 +322,6 @@ app.post('/sessions', (req, res) => {
   res.json({ session_id: session_id, customer_url: customer_url, viewer_url: viewer_url });
 });
 
-// Auto-recreate session if expired — fixes Railway restart issue
 function getOrCreateSession(id) {
   if (!sessions.has(id)) {
     sessions.set(id, {
@@ -385,7 +385,6 @@ app.post('/sessions/:id/end', (req, res) => {
   res.json({ ok: true });
 });
 
-// ── SMS ───────────────────────────────────────────────────────────────────────
 app.post('/sms', async (req, res) => {
   const to = req.body.to, url = req.body.url, ticket_id = req.body.ticket_id;
   if (!to || !url) return res.status(400).json({ error: 'to and url required' });
